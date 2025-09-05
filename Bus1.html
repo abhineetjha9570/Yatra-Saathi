@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Yatra Saathi — Punjab Demo (All Features)</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Leaflet (Map) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    /* Small custom styles */
+    #map { height: 100%; width: 100%; border-radius: 12px; }
+    .timeline { border-left: 3px solid rgba(37,99,235,0.9); padding-left: 12px; }
+    .stop { margin: 10px 0; display:flex; justify-content:space-between; align-items:center; gap:10px; }
+    .stop .label { font-weight:700; }
+    .stop.reached .label { color:#10b981; }  /* green */
+    .stop.current .label { color:#2563eb; }  /* blue */
+    .stop.upcoming .label { color:#6b7280; } /* gray */
+    .bus-icon {
+      background: linear-gradient(135deg,#06b6d4,#2563eb);
+      color: white;
+      width: 36px;
+      height: 36px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      border-radius:10px;
+      font-weight:800;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+      transform: translate(-18px,-18px);
+    }
+    .hidden { display:none; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-800" 
+  style="background: url('https://images.unsplash.com/photo-1501785888041-af3ef285b470?ixlib=rb-4.0.3&auto=format&fit=crop&w=1920&q=80') 
+         no-repeat center center fixed; 
+         background-size: cover;">
+
+  <!-- Header -->
+  <header class="bg-gradient-to-r from-blue-700 to-cyan-600 text-white">
+    <div class="max-w-6xl mx-auto flex items-center justify-between px-6 py-4">
+      <div class="flex items-center gap-3">
+        <div class="text-2xl font-extrabold select-none">🚌</div>
+        <div>
+          <div class="text-xl font-bold">Yatra Saathi</div>
+          <div class="text-sm opacity-90">Punjab demo — Timeline first, Map on demand</div>
+        </div>
+      </div>
+      <div class="hidden md:flex gap-6 text-sm">
+        <div class="hover:underline cursor-pointer">Home</div>
+        <div class="hover:underline cursor-pointer">Track Bus</div>
+        <div class="hover:underline cursor-pointer">Set Alarm</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <main class="max-w-6xl mx-auto p-6">
+    <!-- Search Card -->
+    <section class="bg-white rounded-2xl shadow-lg p-6 mb-6">
+      <div class="md:flex md:items-end md:gap-4">
+        <div class="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label class="text-sm font-semibold text-gray-600 mb-1 block">From</label>
+            <select id="fromSelect" class="p-3 border rounded-lg w-full text-gray-800">
+              <option value="" disabled selected>📍 Select origin</option>
+              <option value="Ludhiana">Ludhiana</option>
+              <option value="Khanna">Khanna</option>
+              <option value="Rajpura">Rajpura</option>
+              <option value="Chandigarh">Chandigarh</option>
+              <option value="Samrala">Samrala</option>
+              <option value="Kharar">Kharar</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-sm font-semibold text-gray-600 mb-1 block">To</label>
+            <select id="toSelect" class="p-3 border rounded-lg w-full text-gray-800">
+              <option value="" disabled selected>🎯 Select destination</option>
+              <option value="Chandigarh">Chandigarh</option>
+              <option value="Ludhiana">Ludhiana</option>
+              <option value="Khanna">Khanna</option>
+              <option value="Rajpura">Rajpura</option>
+              <option value="Samrala">Samrala</option>
+              <option value="Kharar">Kharar</option>
+            </select>
+          </div>
+        </div>
+        <div class="mt-4 md:mt-0 flex gap-3">
+          <button id="searchBtn" class="px-6 py-3 bg-blue-600 text-white rounded-lg shadow hover:bg-blue-700">Search</button>
+          <button id="resetBtn" class="px-4 py-3 bg-gray-100 rounded-lg">Reset</button>
+        </div>
+      </div>
+      <p class="text-xs text-gray-500 mt-3">Tip: Reverse From ↔ To for return buses. Minimum 5 buses shown for every pair.</p>
+    </section>
+
+    <!-- Listing -->
+    <section id="listingSection" class="space-y-4"></section>
+  </main>
+
+  <!-- Timeline Overlay (opens first on "Track Live") -->
+  <div id="timelineOverlay" class="fixed inset-0 bg-white hidden z-40 overflow-y-auto">
+    <div class="bg-gradient-to-r from-blue-700 to-cyan-600 text-white px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <button id="closeTimelineBtn" class="px-3 py-1 rounded bg-white/20 hover:bg-white/30">Close</button>
+        <div>
+          <div id="tlBusName" class="font-bold"></div>
+          <div id="tlRoute" class="text-sm opacity-90"></div>
+        </div>
+      </div>
+      <div id="tlCrowd" class="text-sm font-semibold px-3 py-1 rounded-lg bg-white/20"></div>
+    </div>
+
+    <div class="max-w-5xl mx-auto p-6">
+      <!-- Status Row -->
+      <div class="flex flex-wrap items-center gap-3 mb-4">
+        <div id="tlStatus" class="px-3 py-2 rounded-lg text-sm font-semibold bg-green-100 text-green-700">On Time</div>
+        <div id="tlEta" class="text-sm text-gray-600"></div>
+      </div>
+
+      <!-- Timeline -->
+      <div class="bg-white rounded-2xl shadow p-6">
+        <h3 class="text-base font-bold text-gray-700 mb-3">Route Timeline</h3>
+        <div id="tlTimeline" class="timeline"></div>
+
+        <div class="mt-6 flex flex-wrap gap-3">
+          <button id="openMapBtn" class="px-4 py-2 bg-blue-600 text-white rounded-lg shadow hover:bg-blue-700">📍 View Live Map</button>
+          <button id="pauseSimBtn" class="px-4 py-2 bg-amber-400 text-black rounded-lg">Pause</button>
+          <button id="backToListBtn" class="px-4 py-2 bg-gray-100 rounded-lg">Back to List</button>
+        </div>
+
+        <p class="text-xs text-gray-500 mt-4">Demo note: GPS is simulated. Status compares estimated vs scheduled arrival.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Map Modal (opens from timeline) -->
+  <div id="mapModal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+    <div class="bg-white rounded-2xl shadow-2xl w-[95%] md:w-[92%] h-[90vh] overflow-hidden flex flex-col">
+      <div class="flex items-center justify-between px-4 py-3 border-b">
+        <div class="font-bold" id="mapTitle">Live Map</div>
+        <button id="closeMapBtn" class="px-3 py-1 bg-gray-100 rounded hover:bg-gray-200">Close</button>
+      </div>
+      <div class="flex-1 p-4">
+        <div id="map" class="h-full rounded-lg shadow-inner"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Alarm Modal (from Bus card) -->
+  <div id="alarmModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-[60]">
+    <div class="bg-white rounded-xl p-5 w-80 shadow-xl">
+      <h3 class="text-lg font-bold">🔔 Set Alarm</h3>
+      <p class="text-sm text-gray-600 mt-2">Notify me before arrival at chosen stop</p>
+      <select id="alarmStopSelect" class="w-full p-2 mt-3 border rounded"></select>
+      <input id="alarmBefore" type="number" placeholder="Minutes before (eg. 5)" class="w-full mt-3 p-2 border rounded" />
+      <div class="flex justify-end gap-3 mt-4">
+        <button id="cancelAlarmBtn" class="px-3 py-2 bg-gray-100 rounded">Cancel</button>
+        <button id="confirmAlarmBtn" class="px-3 py-2 bg-blue-600 text-white rounded">Set</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Alarm Sound -->
+  <audio id="alarmAudio">
+    <source src="https://www.soundjay.com/buttons/sounds/beep-07.mp3" type="audio/mpeg">
+  </audio>
+
+<script>
+/* ===========================
+   Utilities
+=========================== */
+const nowPlus = (m)=>{ const d=new Date(); d.setMinutes(d.getMinutes()+m); return d; };
+const fmt = (d)=> d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+const minsBetween = (a,b)=> Math.round((b-a)/60000);
+const randInt = (a,b)=> Math.floor(Math.random()*(b-a+1))+a;
+const sample = (arr)=> arr[Math.floor(Math.random()*arr.length)];
+const toRad = (v)=> v * Math.PI/180;
+function haversineKm(a,b){
+  const R=6371, dLat=toRad(b.lat-a.lat), dLon=toRad(b.lng-a.lng);
+  const la1=toRad(a.lat), la2=toRad(b.lat);
+  const h = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+
+/* City coordinates (Punjab demo) */
+const cityCoords = {
+  "Ludhiana":   {lat:30.9010,lng:75.8573},
+  "Khanna":     {lat:30.7056,lng:76.2220},
+  "Rajpura":    {lat:30.4830,lng:76.5930},
+  "Chandigarh": {lat:30.7333,lng:76.7794},
+  "Samrala":    {lat:30.8388,lng:76.1936},
+  "Kharar":     {lat:30.7463,lng:76.6469}
+};
+
+/* Interpolate route points between two coords */
+function straightRoute(a,b,steps=8){
+  const pts=[];
+  for(let i=0;i<steps;i++){
+    const t=i/(steps-1);
+    pts.push([a.lat+(b.lat-a.lat)*t, a.lng+(b.lng-a.lng)*t]);
+  }
+  return pts;
+}
+
+/* ===========================
+   Base demo buses (few real-ish)
+=========================== */
+const baseBuses = [
+  {
+    id:"PUN-101", number:"101A", name:"Punjab Express",
+    from:"Ludhiana", to:"Chandigarh",
+    capacity:48, occupancy:12, crowd:"Low", speedKmph:62,
+    stops:[
+      {name:"Ludhiana ISBT", time: nowPlus(-10)},
+      {name:"Khanna",        time: nowPlus(40)},
+      {name:"Rajpura",       time: nowPlus(95)},
+      {name:"Chandigarh ISBT", time: nowPlus(140)}
+    ],
+    route: [[30.9010,75.8573],[30.805,76.00],[30.7056,76.2220],[30.55,76.45],[30.7333,76.7794]]
+  },
+  {
+    id:"PUN-204", number:"204B", name:"Ludhiana Shuttle",
+    from:"Ludhiana", to:"Chandigarh",
+    capacity:48, occupancy:30, crowd:"Medium", speedKmph:55,
+    stops:[
+      {name:"Ludhiana ISBT", time: nowPlus(-5)},
+      {name:"Samrala",       time: nowPlus(35)},
+      {name:"Kharar",        time: nowPlus(95)},
+      {name:"Chandigarh ISBT", time: nowPlus(145)}
+    ],
+    route: [[30.9010,75.8573],[30.78,76.05],[30.62,76.33],[30.7333,76.7794]]
+  },
+  {
+    id:"PUN-310", number:"310C", name:"CityLine",
+    from:"Khanna", to:"Chandigarh",
+    capacity:40, occupancy:34, crowd:"High", speedKmph:50,
+    stops:[
+      {name:"Khanna",          time: nowPlus(5)},
+      {name:"Rajpura",         time: nowPlus(65)},
+      {name:"Chandigarh ISBT", time: nowPlus(120)}
+    ],
+    route: [[30.7056,76.2220],[30.62,76.33],[30.7333,76.7794]]
+  },
+  {
+    id:"PUN-411", number:"411D", name:"GreenLine Express",
+    from:"Ludhiana", to:"Chandigarh",
+    capacity:50, occupancy:28, crowd:"Medium", speedKmph:65,
+    stops:[
+      {name:"Ludhiana ISBT",   time: nowPlus(0)},
+      {name:"Khanna",          time: nowPlus(55)},
+      {name:"Rajpura",         time: nowPlus(110)},
+      {name:"Chandigarh ISBT", time: nowPlus(160)}
+    ],
+    route: [[30.9010,75.8573],[30.82,76.08],[30.63,76.39],[30.7333,76.7794]]
+  },
+  {
+    id:"PUN-505", number:"505E", name:"FastTrack",
+    from:"Ludhiana", to:"Chandigarh",
+    capacity:52, occupancy:10, crowd:"Low", speedKmph:75,
+    stops:[
+      {name:"Ludhiana ISBT",   time: nowPlus(-20)},
+      {name:"Rajpura",         time: nowPlus(40)},
+      {name:"Chandigarh ISBT", time: nowPlus(90)}
+    ],
+    route: [[30.9010,75.8573],[30.68,76.30],[30.7333,76.7794]]
+  },
+  {
+    id:"PUN-606", number:"606F", name:"MetroLink",
+    from:"Ludhiana", to:"Chandigarh",
+    capacity:45, occupancy:22, crowd:"Medium", speedKmph:58,
+    stops:[
+      {name:"Ludhiana ISBT",   time: nowPlus(2)},
+      {name:"Khanna",          time: nowPlus(52)},
+      {name:"Rajpura",         time: nowPlus(108)},
+      {name:"Chandigarh ISBT", time: nowPlus(155)}
+    ],
+    route: [[30.9010,75.8573],[30.745,76.12],[30.64,76.45],[30.7333,76.7794]]
+  }
+];
+
+/* Create reverse bus variant */
+function reverseBus(orig, from, to){
+  const copy = JSON.parse(JSON.stringify(orig));
+  copy.id = orig.id + "-R";
+  copy.number = orig.number + "R";
+  copy.name = orig.name + " (Return)";
+  copy.from = from; copy.to = to;
+  copy.route = orig.route.slice().reverse();
+  const first = orig.stops[0].time, last = orig.stops[orig.stops.length-1].time, total = last-first;
+  copy.stops = orig.stops.slice().reverse().map((s, idx)=>{
+    const origIdx = orig.stops.length-1-idx;
+    const t = orig.stops[origIdx].time;
+    const off = t - first;
+    const newOff = Math.max(0,total-off);
+    return { name: s.name, time: new Date(first.getTime()+newOff) };
+  });
+  return copy;
+}
+
+/* Synthesize demo buses for any pair to ensure minimum 5 */
+function synthesizeBuses(from,to,needed){
+  const a = cityCoords[from], b = cityCoords[to];
+  if(!a || !b) return [];
+  const totalKm = haversineKm(a,b);
+  const estMinutesTotal = Math.max(40, Math.round((totalKm/55)*60)); // 55 km/h avg
+  const baseStart = nowPlus(randInt(-10, 25)); // staggered departures
+
+  const out=[];
+  for(let i=0;i<needed;i++){
+    const id = `DEM-${from.slice(0,3).toUpperCase()}-${to.slice(0,3).toUpperCase()}-${100+i}`;
+    const speed = randInt(50,70);
+    const crowd = sample(["Low","Medium","High"]);
+    const capacity = sample([40,45,48,50,52]);
+    const occupancy = crowd==="High" ? randInt(Math.floor(capacity*0.7), capacity-2)
+                      : crowd==="Medium" ? randInt(Math.floor(capacity*0.4), Math.floor(capacity*0.75))
+                      : randInt(5, Math.floor(capacity*0.35));
+    const route = straightRoute(a,b,randInt(6,9));
+    // 4 stops: From, Stop A, Stop B, To
+    const t0 = new Date(baseStart.getTime() + i*randInt(6,14)*60000);
+    const t1 = new Date(t0.getTime() + Math.round(estMinutesTotal*0.35)*60000);
+    const t2 = new Date(t0.getTime() + Math.round(estMinutesTotal*0.70)*60000);
+    const t3 = new Date(t0.getTime() + estMinutesTotal*60000);
+    const stops = [
+      {name: `${from} ISBT`, time: t0},
+      {name: "Stop A", time: t1},
+      {name: "Stop B", time: t2},
+      {name: `${to} ISBT`, time: t3},
+    ];
+    out.push({
+      id, number: `${randInt(200,899)}X`, name: `${from}-${to} CityLine`,
+      from, to, capacity, occupancy, crowd, speedKmph:speed, stops, route
+    });
+  }
+  return out;
+}
+
+/* Make display buses for a selected pair and ensure at least 5 */
+function makeDisplayBuses(from,to){
+  let list=[];
+  // direct matches
+  baseBuses.forEach(b=>{ if(b.from===from && b.to===to) list.push(JSON.parse(JSON.stringify(b))); });
+  // reverse matches
+  baseBuses.forEach(b=>{ if(b.from===to && b.to===from) list.push(reverseBus(b,from,to)); });
+
+  if(list.length < 5){
+    const synth = synthesizeBuses(from,to, 5 - list.length);
+    list = list.concat(synth);
+  }
+  // Add mild randomized delay status flags
+  list.forEach(bus=>{
+    const delayed = Math.random()<0.35; // ~35% delayed
+    bus._delayMin = delayed ? randInt(4,18) : 0;
+  });
+  return list;
+}
+
+/* ===========================
+   Listing UI
+=========================== */
+const listingSection = document.getElementById('listingSection');
+
+function buildListingUI(from, to){
+  listingSection.innerHTML = '';
+  if(!from || !to){
+    listingSection.innerHTML = `<div class="max-w-3xl mx-auto bg-white p-6 rounded-2xl shadow text-gray-600">
+      Select both From & To to see buses (min 5 per route).
+    </div>`;
+    return;
+  }
+  if(from===to){
+    listingSection.innerHTML = `<div class="max-w-3xl mx-auto bg-white p-6 rounded-2xl shadow text-rose-600">
+      From and To cannot be the same.
+    </div>`;
+    return;
+  }
+
+  const buses = makeDisplayBuses(from, to);
+  buses.forEach(bus=>{
+    const nextDep = bus.stops[0].time;
+    const lastArr = bus.stops[bus.stops.length-1].time;
+    const statusText = bus._delayMin>0 ? `Delayed +${bus._delayMin} min` : 'On Time';
+    const statusCls = bus._delayMin>0 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700';
+    const crowdClass = bus.crowd==='High' ? 'text-red-600 bg-red-100'
+                      : bus.crowd==='Medium' ? 'text-yellow-700 bg-yellow-100'
+                      : 'text-green-700 bg-green-100';
+
+    const card = document.createElement('div');
+    card.className = 'max-w-3xl mx-auto bg-white p-5 rounded-2xl shadow-md border';
+    card.innerHTML = `
+      <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+        <div>
+          <div class="text-lg font-bold text-sky-700">${bus.name} <span class="text-xs text-gray-500 font-medium">(${bus.number} • ${bus.id})</span></div>
+          <div class="text-sm text-gray-600">${bus.from} → ${bus.to}</div>
+          <div class="text-sm text-gray-600 mt-1">⏱ ${fmt(nextDep)} → ${fmt(lastArr)}</div>
+          <div class="mt-2 text-sm">
+            <span class="px-2 py-1 rounded ${statusCls} font-semibold">${statusText}</span>
+            <span class="ml-2 px-2 py-1 rounded ${crowdClass} font-semibold">Crowd: ${bus.crowd}</span>
+            <span class="ml-2 text-gray-600">Seats: ${bus.capacity - bus.occupancy}/${bus.capacity}</span>
+          </div>
+        </div>
+        <div class="flex gap-2 items-center">
+          <button class="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700" onclick="openTimeline('${bus.id}')">Track Live</button>
+          <button class="px-3 py-2 bg-amber-400 rounded-lg hover:bg-amber-500" onclick="openAlarm('${bus.id}')">Set Alarm</button>
+        </div>
+      </div>
+
+      <div class="mt-4 text-sm text-gray-600">
+        <div class="timeline-small flex gap-4 items-center overflow-x-auto">
+          ${bus.stops.map((s)=> `
+            <div class="flex items-center gap-2">
+              <div class="w-2 h-2 rounded-full ${s.time <= new Date() ? 'bg-green-500' : 'bg-gray-300'}"></div>
+              <div>${s.name} <span class="text-xs text-gray-500">(${fmt(s.time)})</span></div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+    card.dataset.busid = bus.id;
+    listingSection.appendChild(card);
+  });
+}
+
+/* Search / Reset buttons */
+document.getElementById('searchBtn').addEventListener('click', ()=>{
+  const from = document.getElementById('fromSelect').value;
+  const to   = document.getElementById('toSelect').value;
+  buildListingUI(from,to);
+  // Close overlays if any open
+  closeTimeline();
+  closeMap();
+  closeAlarmModal();
+});
+document.getElementById('resetBtn').addEventListener('click', ()=>{
+  document.getElementById('fromSelect').selectedIndex = 0;
+  document.getElementById('toSelect').selectedIndex = 0;
+  listingSection.innerHTML = '';
+  closeTimeline();
+  closeMap();
+  closeAlarmModal();
+});
+
+/* ===========================
+   Timeline + Map Simulation
+=========================== */
+let timelineBus=null;
+let map=null, routeLine=null, busMarker=null;
+let simTimer=null, simIdx=0, simProg=0;
+let paused=false;
+
+function getBusById(busId){
+  // Try current displayed list first
+  const from = document.getElementById('fromSelect').value;
+  const to = document.getElementById('toSelect').value;
+  let list = [];
+  if(from && to) list = makeDisplayBuses(from,to);
+  let found = list.find(b=>b.id===busId);
+  if(found) return found;
+
+  // Else look in base and reversed
+  const base = baseBuses.find(b=>b.id===busId);
+  if(base) return JSON.parse(JSON.stringify(base));
+  if(busId.endsWith('-R')){
+    const orig = baseBuses.find(b=> (busId.startsWith(b.id)));
+    if(orig){
+      const fromX = busId.split('-R')[0]; // not used, we will reverse by orig
+      return reverseBus(orig, orig.to, orig.from);
+    }
+  }
+  return null;
+}
+
+function openTimeline(busId){
+  timelineBus = getBusById(busId);
+  if(!timelineBus){ alert('Bus not found'); return; }
+
+  // Header info
+  document.getElementById('tlBusName').innerText = `${timelineBus.name} (${timelineBus.number})`;
+  document.getElementById('tlRoute').innerText = `${timelineBus.from} → ${timelineBus.to}`;
+  const crowdEl = document.getElementById('tlCrowd');
+  crowdEl.className = 'text-sm font-semibold px-3 py-1 rounded-lg';
+  if(timelineBus.crowd==='Low') crowdEl.classList.add('bg-green-50','text-green-700');
+  else if(timelineBus.crowd==='Medium') crowdEl.classList.add('bg-yellow-50','text-yellow-700');
+  else crowdEl.classList.add('bg-red-50','text-red-700');
+  crowdEl.innerText = `Crowd: ${timelineBus.crowd} • ${timelineBus.occupancy}/${timelineBus.capacity}`;
+
+  // Status calc (rough ETA to last stop)
+  updateStatusDisplay();
+
+  // Timeline body
+  const tl = document.getElementById('tlTimeline');
+  tl.innerHTML = '';
+  timelineBus.stops.forEach((s, idx)=>{
+    const row = document.createElement('div');
+    row.id = `tl-stop-${idx}`;
+    row.className = 'stop upcoming';
+    const delayText = timelineBus._delayMin>0 && idx>0 ? `<span class="text-rose-600 text-xs font-semibold ml-2">+${timelineBus._delayMin} min</span>` : '';
+    row.innerHTML = `
+      <div class="label">${s.name}</div>
+      <div class="text-right">
+        <div class="text-sm font-semibold">${fmt(s.time)} ${delayText}</div>
+      </div>
+    `;
+    tl.appendChild(row);
+  });
+  // initial highlight
+  updateTimelinePosition(timelineBus.route[0]);
+
+  // Show overlay
+  document.getElementById('timelineOverlay').classList.remove('hidden');
+  paused=false;
+  document.getElementById('pauseSimBtn').innerText = 'Pause';
+}
+
+function closeTimeline(){
+  document.getElementById('timelineOverlay').classList.add('hidden');
+  // Note: do not stop sim here; sim runs only in map view
+}
+
+function updateTimelinePosition(currLL){
+  // Heuristic: map current position against route index and mark stops
+  timelineBus.stops.forEach((s, idx)=>{
+    const el = document.getElementById(`tl-stop-${idx}`);
+    if(!el) return;
+    const pIdx = Math.min(idx, timelineBus.route.length-1);
+    const routePt = {lat: timelineBus.route[pIdx][0], lng: timelineBus.route[pIdx][1]};
+    const d = haversineKm({lat: currLL[0], lng: currLL[1]}, routePt);
+    if(d < 1.0) el.className='stop current';
+    else if(new Date() >= s.time) el.className='stop reached';
+    else el.className='stop upcoming';
+  });
+}
+
+function updateStatusDisplay(){
+  const pts = timelineBus.route;
+  // Assume current at start for timeline status (map will keep updating later)
+  const pos = {lat: pts[0][0], lng: pts[0][1]};
+  let remKm=0;
+  for(let i=0;i<pts.length-1;i++){
+    remKm += haversineKm({lat:pts[i][0],lng:pts[i][1]},{lat:pts[i+1][0],lng:pts[i+1][1]});
+  }
+  const speed = timelineBus.speedKmph || 55;
+  const estMin = Math.max(1, Math.round((remKm/speed)*60));
+  const scheduledFinal = timelineBus.stops[timelineBus.stops.length-1].time;
+  const estArrival = new Date(Date.now() + estMin*60000 + (timelineBus._delayMin||0)*60000);
+  const diffMin = Math.round((estArrival - scheduledFinal)/60000);
+
+  const badge = document.getElementById('tlStatus');
+  const eta = document.getElementById('tlEta');
+  if(diffMin>0){ badge.innerText = `Delayed by ${diffMin} min`; badge.className='px-3 py-2 rounded-lg text-sm font-semibold bg-red-100 text-red-700'; }
+  else { badge.innerText='On Time'; badge.className='px-3 py-2 rounded-lg text-sm font-semibold bg-green-100 text-green-700'; }
+  eta.innerText = `Est arrival: ${fmt(estArrival)} • Scheduled: ${fmt(scheduledFinal)}`;
+}
+
+/* Map open/close + movement */
+document.getElementById('openMapBtn').addEventListener('click', ()=>{
+  if(!timelineBus){ alert('Select a bus first'); return; }
+  document.getElementById('mapModal').classList.remove('hidden');
+  document.getElementById('mapModal').classList.add('flex');
+  document.getElementById('mapTitle').innerText = `${timelineBus.name} — ${timelineBus.from} → ${timelineBus.to}`;
+
+  // Init or reset map
+  if(map){ map.remove(); map=null; }
+  map = L.map('map', { zoomControl:true }).setView(timelineBus.route[0], 10);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19}).addTo(map);
+
+  if(routeLine) routeLine.remove();
+  routeLine = L.polyline(timelineBus.route, { color:'#2563eb', weight:5, opacity:0.9 }).addTo(map);
+  L.marker(timelineBus.route[0]).addTo(map).bindPopup('Start').openPopup();
+  L.marker(timelineBus.route[timelineBus.route.length-1]).addTo(map).bindPopup('End');
+
+  map.fitBounds(routeLine.getBounds(), { padding:[40,40] });
+
+  if(busMarker) busMarker.remove();
+  const icon = L.divIcon({ html:`<div class="bus-icon">🚌</div>`, className:'', iconSize:[36,36] });
+  busMarker = L.marker(timelineBus.route[0], { icon }).addTo(map);
+
+  // Start simulation
+  simIdx=0; simProg=0; paused=false;
+  if(simTimer) clearInterval(simTimer);
+  simTimer = setInterval(simStep, 1500);
+});
+
+document.getElementById('closeMapBtn').addEventListener('click', closeMap);
+function closeMap(){
+  document.getElementById('mapModal').classList.add('hidden');
+  document.getElementById('mapModal').classList.remove('flex');
+  if(simTimer){ clearInterval(simTimer); simTimer=null; }
+}
+
+document.getElementById('closeTimelineBtn').addEventListener('click', closeTimeline);
+document.getElementById('backToListBtn').addEventListener('click', ()=>{
+  closeTimeline(); closeMap();
+});
+
+document.getElementById('pauseSimBtn').addEventListener('click', ()=>{
+  paused=!paused;
+  document.getElementById('pauseSimBtn').innerText = paused ? 'Resume' : 'Pause';
+});
+
+function simStep(){
+  if(!timelineBus || paused) return;
+  const pts = timelineBus.route;
+  if(simIdx >= pts.length - 1){
+    clearInterval(simTimer);
+    return;
+  }
+  const a = { lat: pts[simIdx][0], lng: pts[simIdx][1] };
+  const b = { lat: pts[simIdx+1][0], lng: pts[simIdx+1][1] };
+  const segKm = haversineKm(a,b);
+  const segHours = segKm / (timelineBus.speedKmph || 55);
+  // compress time for demo
+  const segSecondsDemo = Math.max(3, Math.round((segHours*3600)/6));
+  const step = 1 / (segSecondsDemo / 1.5); // 1.5s tick
+  simProg += step;
+  if(simProg >= 1){ simIdx++; simProg=0; }
+  const lat = a.lat + (b.lat - a.lat)*simProg;
+  const lng = a.lng + (b.lng - a.lng)*simProg;
+  if(busMarker) busMarker.setLatLng([lat,lng]);
+  updateTimelinePosition([lat,lng]);
+}
+
+/* ===========================
+   Alarm (from Bus Card)
+=========================== */
+let alarmBus=null;
+document.getElementById('cancelAlarmBtn').addEventListener('click', closeAlarmModal);
+document.getElementById('confirmAlarmBtn').addEventListener('click', confirmAlarm);
+
+function openAlarm(busId){
+  // Get bus from current display list
+  const from = document.getElementById('fromSelect').value;
+  const to   = document.getElementById('toSelect').value;
+  const list = (from && to) ? makeDisplayBuses(from,to) : [];
+  alarmBus = list.find(b=>b.id===busId);
+  if(!alarmBus) { alert('Bus not found for alarm'); return; }
+
+  const sel = document.getElementById('alarmStopSelect');
+  sel.innerHTML = '';
+  alarmBus.stops.forEach((s, idx)=>{
+    sel.add(new Option(`${s.name} (${fmt(s.time)})`, idx));
+  });
+  document.getElementById('alarmBefore').value = 5;
+  document.getElementById('alarmModal').classList.remove('hidden');
+  document.getElementById('alarmModal').classList.add('flex');
+}
+
+function closeAlarmModal(){
+  document.getElementById('alarmModal').classList.add('hidden');
+  document.getElementById('alarmModal').classList.remove('flex');
+}
+
+function confirmAlarm(){
+  const idx = parseInt(document.getElementById('alarmStopSelect').value,10);
+  const minutesBefore = parseInt(document.getElementById('alarmBefore').value,10);
+  if(isNaN(idx) || isNaN(minutesBefore)){ alert('Select stop and minutes'); return; }
+
+  const stop = alarmBus.stops[idx];
+  const now = new Date();
+  const msUntil = stop.time - now - minutesBefore*60000;
+  if(msUntil <= 0){ alert('Stop already passed or too close'); closeAlarmModal(); return; }
+
+  alert(`Alarm set: ${alarmBus.name} → ${stop.name} (${minutesBefore} min before)`);
+  setTimeout(()=>{
+    try{ document.getElementById('alarmAudio').play(); }catch(e){}
+    alert(`⏰ ${alarmBus.name} approaching ${stop.name}`);
+  }, msUntil);
+
+  closeAlarmModal();
+}
+
+/* ===========================
+   Initial
+=========================== */
+// Nothing in listing until user searches
+</script>
+</body>
+</html>
+
+
